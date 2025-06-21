@@ -6,6 +6,25 @@ import os
 import re
 
 
+def process_name(name, delay=0.1):
+    """
+    Helper function to process a single name:
+    1. Validates the name
+    2. Checks availability
+    3. Returns tuple (name, is_valid, reason, is_available)
+    """
+    # Validate name according to PyPI rules
+    is_valid, reason = validate_name(name)
+    if not is_valid:
+        return name, False, reason, None
+
+    # Check availability using multiple methods
+    available = is_available(name)
+    status = " ✅ free" if available else " ❌ taken"
+    print(status)
+    return name, True, None, available
+
+
 def is_available(pkg):
     """
     Sprawdza dostępność nazwy na PyPI używając wielu metod.
@@ -43,49 +62,46 @@ def is_available(pkg):
         return False
 
 
-def validate_name(name):
+def validate_name(pkg):
     """
-    Waliduje nazwę na podstawie zasad PyPI.
+    Validates if a name is valid according to PyPI rules.
+    Returns tuple (is_valid, reason) where:
+    - is_valid: boolean indicating if name is valid
+    - reason: string explaining why name is invalid (None if valid)
     """
-    # Nazwa musi mieć co najmniej 2 znaki
-    if len(name) < 2:
-        return False, "Nazwa musi mieć co najmniej 2 znaki"
-        
-    # Nazwa nie może zawierać spacji
-    if ' ' in name:
-        return False, "Nazwa nie może zawierać spacji"
-        
-    # Nazwa może zawierać tylko małe litery, cyfry, podkreślenia i myślniki
-    if not re.match(r'^[a-z0-9_\-]+$', name):
-        return False, "Nazwa może zawierać tylko małe litery, cyfry, podkreślenia i myślniki"
-        
-    # Nazwa nie może zaczynać się od podkreślenia
-    if name.startswith('_'):
-        return False, "Nazwa nie może zaczynać się od podkreślenia"
-        
-    # Lista zarezerwowanych słów
-    reserved_words = {
-        'host', 'python', 'py', 'pip', 'conda', 'anaconda',
-        'pypi', 'github', 'git', 'npm', 'node', 'javascript',
-        'java', 'ruby', 'rust', 'go', 'c', 'cpp', 'c++',
-        'typescript', 'php', 'sql', 'nosql', 'mongodb', 'mysql',
-        'postgresql', 'oracle', 'microsoft', 'google', 'amazon',
-        'aws', 'azure', 'gcp', 'docker', 'kubernetes', 'k8s',
-        'terraform', 'ansible', 'jenkins', 'circleci', 'githubactions',
-        'gitlabci', 'travisci', 'bitbucket', 'jenkins', 'travisci',
-        'circleci', 'githubactions', 'gitlabci', 'bitbucketpipelines',
-        'azurepipelines', 'appveyor', 'codeship', 'drone', 'wercker',
-        'shippable', 'semaphore', 'buildkite', 'teamcity', 'bamboo',
-        'octopus', 'spinnaker', 'argocd', 'helm', 'kustomize',
-        'docker', 'containerd', 'podman', 'crio', 'runc', 'containerd-shim',
-        'katacontainers', 'gvisor', 'firecracker', 'crosvm', 'cloud-hypervisor'
-    }
-    
-    # Nazwa nie może być zarezerwowana
-    if name.lower() in reserved_words:
-        return False, f"Nazwa '{name}' jest zarezerwowana"
-        
-    return True, "Nazwa jest poprawna"
+    try:
+        # Load reserved words from file
+        reserved_words = set()
+        try:
+            with open('reserved.txt', 'r') as f:
+                reserved_words = {line.strip().lower() for line in f if line.strip()}
+        except FileNotFoundError:
+            return False, "Nie znaleziono pliku reserved.txt z zarezerwowanymi słowami"
+
+        # 1. Length check
+        if len(pkg) < 2:
+            return False, "Nazwa jest za krótka (minimum 2 znaki)"
+
+        # 2. Character check
+        if not re.match(r'^[a-z0-9_\-]+$', pkg):
+            return False, "Nazwa może zawierać tylko małe litery, cyfry, podkreślenia i myślniki"
+
+        # 3. Cannot start with underscore
+        if pkg.startswith('_'):
+            return False, "Nazwa nie może zaczynać się od podkreślenia"
+
+        # 4. Cannot contain spaces
+        if ' ' in pkg:
+            return False, "Nazwa nie może zawierać spacji"
+
+        # 5. Check against reserved words
+        if pkg.lower() in reserved_words:
+            return False, f"Nazwa '{pkg}' jest zarezerwowana"
+
+        return True, None
+
+    except Exception as e:
+        return False, f"Błąd podczas walidacji: {str(e)}"
 
 
 def check_names_from_file(input_file_path="names.txt",
@@ -160,7 +176,7 @@ def generator(FREE_FILE="free.txt",
               PROGRESS_FILE="progress.txt",
               DELAY=0.1):
     """
-    Generator that checks names in the format "aba" (where a and b are lowercase letters).
+    Generator that checks names in the format "ab" (where a and b are lowercase letters).
     
     Default filenames:
     - Free: free.txt
@@ -185,7 +201,7 @@ def generator(FREE_FILE="free.txt",
         for i in range(start_index, len(letters)):
             a = letters[i]
             for b in letters:
-                name = a + b + a
+                name = a + b
 
                 # Save progress
                 with open(PROGRESS_FILE, "w") as f:
@@ -199,16 +215,21 @@ def generator(FREE_FILE="free.txt",
                 print(f"\rChecking {name} ({current}/{total} - {progress:.1f}%)", end="")
 
                 time.sleep(DELAY)  # Delay based on parameter
-                if is_available(name):
+                name, is_valid, reason, available = process_name(name, DELAY)
+                if not is_valid:
+                    busy_file.write(f"{name} ({reason})\n")
+                    busy_file.flush()
+                    os.fsync(busy_file.fileno())
+                elif available:
                     print(f" ✅ free")
                     free_file.write(name + "\n")
-                    free_file.flush()  # Ensure immediate write
-                    os.fsync(free_file.fileno())  # Force sync to disk
+                    free_file.flush()
+                    os.fsync(free_file.fileno())
                 else:
                     print(f" ❌ taken")
                     busy_file.write(name + "\n")
-                    busy_file.flush()  # Ensure immediate write
-                    os.fsync(busy_file.fileno())  # Force sync to disk
+                    busy_file.flush()
+                    os.fsync(busy_file.fileno())
 
     # Remove progress file after completion
     try:
