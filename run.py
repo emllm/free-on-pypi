@@ -5,8 +5,6 @@ import json
 import os
 
 
-
-
 def is_available(pkg):
     try:
         response = requests.get(f'https://pypi.org/pypi/{pkg}/json')
@@ -40,18 +38,24 @@ def check_names_from_file(input_file_path="names.txt",
         yield name, available
 
 
-def from_file():
+def from_file(INPUT_FILE="names.txt",
+              FREE_FILE="free.txt",
+              BUSY_FILE="busy.txt",
+              DELAY=0.1
+              ):
     """
-    Main function that processes names using the generator and writes results to files.
+    Function that processes names from file using the generator and writes results to files.
+    Uses default parameter values from the generator function.
+    
+    Default filenames:
+    - Input: names.txt
+    - Free: free.txt
+    - Busy: busy.txt
     """
-    input_file_path = "names.txt"
-    delay = 0.1
-    free_file_path = "free.txt"
-    busy_file_path = "busy.txt"
 
     try:
-        with open(free_file_path, "w") as free_file, open(busy_file_path, "w") as busy_file:
-            for name, is_available in check_names_from_file(input_file_path, delay):
+        with open(FREE_FILE, "w") as free_file, open(BUSY_FILE, "w") as busy_file:
+            for name, is_available in check_names_from_file(INPUT_FILE, DELAY):
                 if is_available:
                     free_file.write(name + "\n")
                     free_file.flush()
@@ -61,15 +65,14 @@ def from_file():
                     busy_file.flush()
                     os.fsync(busy_file.fileno())
 
-        print(f"\nZakończono. Wyniki zapisano do:\n- {free_file_path}\n- {busy_file_path}")
+        print(f"\nZakończono. Wyniki zapisano do:\n- {FREE_FILE}\n- {BUSY_FILE}")
     except Exception as e:
         print(f"❌ Wystąpił błąd podczas przetwarzania: {str(e)}")
 
 
-
 def generator():
     letters = string.ascii_lowercase
-    
+
     # Check where to resume
     try:
         with open("progress.txt", "r") as f:
@@ -79,7 +82,7 @@ def generator():
     except:
         start_index = 0
         print("Starting from the beginning")
-    
+
     # Open files in append mode
     with open("free.txt", "a") as free_file, open("busy.txt", "a") as busy_file:
         # Continue from the last place
@@ -87,18 +90,18 @@ def generator():
             a = letters[i]
             for b in letters:
                 name = a + b + a
-                
+
                 # Save progress
                 with open("progress.txt", "w") as f:
                     f.write(name)
                     f.flush()  # Ensure progress is saved immediately
-                
+
                 # Display progress
                 total = len(letters) * len(letters)
                 current = (i * len(letters)) + letters.index(b) + 1
                 progress = (current / total) * 100
                 print(f"\rChecking {name} ({current}/{total} - {progress:.1f}%)", end="")
-                
+
                 time.sleep(0.1)  # 100 ms delay
                 if is_available(name):
                     print(f" ✅ free")
@@ -110,12 +113,13 @@ def generator():
                     busy_file.write(name + "\n")
                     busy_file.flush()  # Ensure immediate write
                     os.fsync(busy_file.fileno())  # Force sync to disk
-    
+
     # Remove progress file after completion
     try:
         os.remove("progress.txt")
     except:
         pass
+
 
 if __name__ == "__main__":
     # main()
