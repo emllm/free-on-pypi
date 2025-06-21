@@ -3,22 +3,96 @@ import string
 import time
 import json
 import os
+import re
 
 
 def is_available(pkg):
+    """
+    Sprawdza dostępność nazwy na PyPI używając wielu metod.
+    """
     try:
-        response = requests.get(f'https://pypi.org/pypi/{pkg}/json')
-        return response.status_code == 404
-    except requests.RequestException:
-        return True  # Assume free if we can't reach PyPI
-    except Exception:
+        # Metoda 1: Sprawdzenie JSON endpoint
+        json_response = requests.get(f'https://pypi.org/pypi/{pkg}/json')
+        if json_response.status_code == 404:
+            return True
+        
+        # Metoda 2: Sprawdzenie strony HTML
+        html_response = requests.get(f'https://pypi.org/project/{pkg}')
+        if html_response.status_code == 404:
+            return True
+            
+        # Metoda 3: Sprawdzenie Simple API
+        simple_response = requests.get(f'https://pypi.org/simple/{pkg}')
+        if simple_response.status_code == 404:
+            return True
+            
+        # Metoda 4: Sprawdzenie Simple API (z ukośnikiem)
+        simple_slash_response = requests.get(f'https://pypi.org/simple/{pkg}/')
+        if simple_slash_response.status_code == 404:
+            return True
+            
+        # Jeśli żadna z metod nie dała 404, nazwa jest zajęta
         return False
+        
+    except requests.RequestException as e:
+        print(f"⚠️ Błąd podczas sprawdzania {pkg}: {str(e)}")
+        # Jeśli nie możemy się połączyć, zakładamy, że nazwa jest wolna
+        return True
+    except Exception as e:
+        print(f"⚠️ Nieoczekiwany błąd podczas sprawdzania {pkg}: {str(e)}")
+        return False
+
+
+def validate_name(name):
+    """
+    Waliduje nazwę na podstawie zasad PyPI.
+    """
+    # Nazwa musi mieć co najmniej 2 znaki
+    if len(name) < 2:
+        return False, "Nazwa musi mieć co najmniej 2 znaki"
+        
+    # Nazwa nie może zawierać spacji
+    if ' ' in name:
+        return False, "Nazwa nie może zawierać spacji"
+        
+    # Nazwa może zawierać tylko małe litery, cyfry, podkreślenia i myślniki
+    if not re.match(r'^[a-z0-9_\-]+$', name):
+        return False, "Nazwa może zawierać tylko małe litery, cyfry, podkreślenia i myślniki"
+        
+    # Nazwa nie może zaczynać się od podkreślenia
+    if name.startswith('_'):
+        return False, "Nazwa nie może zaczynać się od podkreślenia"
+        
+    # Lista zarezerwowanych słów
+    reserved_words = {
+        'host', 'python', 'py', 'pip', 'conda', 'anaconda',
+        'pypi', 'github', 'git', 'npm', 'node', 'javascript',
+        'java', 'ruby', 'rust', 'go', 'c', 'cpp', 'c++',
+        'typescript', 'php', 'sql', 'nosql', 'mongodb', 'mysql',
+        'postgresql', 'oracle', 'microsoft', 'google', 'amazon',
+        'aws', 'azure', 'gcp', 'docker', 'kubernetes', 'k8s',
+        'terraform', 'ansible', 'jenkins', 'circleci', 'githubactions',
+        'gitlabci', 'travisci', 'bitbucket', 'jenkins', 'travisci',
+        'circleci', 'githubactions', 'gitlabci', 'bitbucketpipelines',
+        'azurepipelines', 'appveyor', 'codeship', 'drone', 'wercker',
+        'shippable', 'semaphore', 'buildkite', 'teamcity', 'bamboo',
+        'octopus', 'spinnaker', 'argocd', 'helm', 'kustomize',
+        'docker', 'containerd', 'podman', 'crio', 'runc', 'containerd-shim',
+        'katacontainers', 'gvisor', 'firecracker', 'crosvm', 'cloud-hypervisor'
+    }
+    
+    # Nazwa nie może być zarezerwowana
+    if name.lower() in reserved_words:
+        return False, f"Nazwa '{name}' jest zarezerwowana"
+        
+    return True, "Nazwa jest poprawna"
 
 
 def check_names_from_file(input_file_path="names.txt",
                           delay=0.1):
     """
     Generator that yields tuples of (name, is_available) for each name in the input file.
+    Uses multiple validation and availability checking methods.
     """
     try:
         with open(input_file_path, "r") as infile:
@@ -33,9 +107,18 @@ def check_names_from_file(input_file_path="names.txt",
         print(f"Sprawdzam: {name}", end="")
         time.sleep(delay)
 
+        # Validate name according to PyPI rules
+        is_valid, reason = validate_name(name)
+        if not is_valid:
+            print(f" ❌ {reason}")
+            yield name, False, reason
+            continue
+
+        # Check availability using multiple methods
         available = is_available(name)
-        print(" ✅ free" if available else " ❌ taken")
-        yield name, available
+        status = " ✅ free" if available else " ❌ taken"
+        print(status)
+        yield name, available, None
 
 
 def from_file(INPUT_FILE="names.txt",
@@ -54,13 +137,16 @@ def from_file(INPUT_FILE="names.txt",
     """
     try:
         with open(FREE_FILE, "w") as free_file, open(BUSY_FILE, "w") as busy_file:
-            for name, is_available in check_names_from_file(INPUT_FILE, DELAY):
+            for name, is_available, reason in check_names_from_file(INPUT_FILE, DELAY):
                 if is_available:
                     free_file.write(name + "\n")
                     free_file.flush()
                     os.fsync(free_file.fileno())
                 else:
-                    busy_file.write(name + "\n")
+                    if reason:  # If there's a validation reason
+                        busy_file.write(f"{name} ({reason})\n")
+                    else:
+                        busy_file.write(name + "\n")
                     busy_file.flush()
                     os.fsync(busy_file.fileno())
 
