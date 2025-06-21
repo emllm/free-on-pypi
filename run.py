@@ -18,9 +18,10 @@ def is_available(pkg):
 
 
 def check_names_from_file(input_file_path="names.txt",
-                          delay=0.1,
-                          free_file_path="free.txt",
-                          busy_file_path="busy.txt"):
+                          delay=0.1):
+    """
+    Generator that yields tuples of (name, is_available) for each name in the input file.
+    """
     try:
         with open(input_file_path, "r") as infile:
             names = [line.strip().lower() for line in infile if line.strip()]
@@ -30,27 +31,43 @@ def check_names_from_file(input_file_path="names.txt",
 
     print(f"✅ Załadowano {len(names)} nazw z pliku '{input_file_path}'.")
 
-    with open(free_file_path, "w") as free_file, open(busy_file_path, "w") as busy_file:
-        for name in names:
-            print(f"Sprawdzam: {name}", end="")
-            time.sleep(delay)
+    for name in names:
+        print(f"Sprawdzam: {name}", end="")
+        time.sleep(delay)
 
-            if is_available(name):
-                print(" ✅ free")
-                free_file.write(name + "\n")
-                free_file.flush()
-                os.fsync(free_file.fileno())
-            else:
-                print(" ❌ taken")
-                busy_file.write(name + "\n")
-                busy_file.flush()
-                os.fsync(busy_file.fileno())
-
-    print(f"\nZakończono. Wyniki zapisano do:\n- {free_file_path}\n- {busy_file_path}")
+        available = is_available(name)
+        print(" ✅ free" if available else " ❌ taken")
+        yield name, available
 
 
+def from_file():
+    """
+    Main function that processes names using the generator and writes results to files.
+    """
+    input_file_path = "names.txt"
+    delay = 0.1
+    free_file_path = "free.txt"
+    busy_file_path = "busy.txt"
 
-def main():
+    try:
+        with open(free_file_path, "w") as free_file, open(busy_file_path, "w") as busy_file:
+            for name, is_available in check_names_from_file(input_file_path, delay):
+                if is_available:
+                    free_file.write(name + "\n")
+                    free_file.flush()
+                    os.fsync(free_file.fileno())
+                else:
+                    busy_file.write(name + "\n")
+                    busy_file.flush()
+                    os.fsync(busy_file.fileno())
+
+        print(f"\nZakończono. Wyniki zapisano do:\n- {free_file_path}\n- {busy_file_path}")
+    except Exception as e:
+        print(f"❌ Wystąpił błąd podczas przetwarzania: {str(e)}")
+
+
+
+def generator():
     letters = string.ascii_lowercase
     
     # Check where to resume
@@ -102,4 +119,4 @@ def main():
 
 if __name__ == "__main__":
     # main()
-    check_names_from_file()
+    from_file()
